@@ -2,23 +2,15 @@ import uuid
 import streamlit as st
 from user_manager import UserManager
 from ai_engine import ChatBotEngine
+from ui_components import inject_custom_theme, render_login_header
 
-st.set_page_config(page_title="2nd Chat Bot Pro", page_icon="🤖", layout="wide")
+# ⚠️ FIX: Changed to "centered" layout to naturally group the login form and remove empty space bugs
+st.set_page_config(page_title="S U J O Y", page_icon="🤖", layout="centered")
 
-# 🎨 CUSTOM STYLING INTERFACE INJECTION (CSS THEME POLISH)
-st.markdown(
-    """
-    <style>
-        .stButton>button { border-radius: 8px !important; transition: all 0.3s ease; }
-        .stButton>button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        div[data-testid="stExpander"] { border-radius: 10px !important; border: 1px solid #e0e0e0; }
-        .stMetric { background: #f8f9fa; padding: 10px; border-radius: 8px; border: 1px solid #eaeaea; }
-    </style>
-""",
-    unsafe_allow_html=True,
-)
+# Trigger clean design layers
+inject_custom_theme()
 
-# 🛠️ INITIALIZE BACKEND CONFIGURATIONS INDEPENDENTLY
+# INITIALIZE BACKEND CONFIGURATIONS INDEPENDENTLY
 if "user_manager" not in st.session_state:
     st.session_state.user_manager = UserManager()
 
@@ -30,55 +22,78 @@ if "bot_engine" not in st.session_state:
 if "authenticated_user" not in st.session_state:
     st.session_state.authenticated_user = None
 
-# 🔐 WALL OF AUTHENTICATION: RENDER LOGIN SCREEN IF NO USER LOGGED IN
+# 🔐 WALL OF AUTHENTICATION: RENDER GATEWAY OVERLAY IF NO USER ACTIVE
 if st.session_state.authenticated_user is None:
-    st.title("🔒 Chatbot Access Gateway")
-    tab_login, tab_signup = st.tabs(
-        ["🔑 Existing Account Login", "📝 Create Free Account"]
-    )
 
-    with tab_login:
-        with st.form("login_form"):
-            user_input = st.text_input("Username").strip().lower()
-            pass_input = st.text_input("Password", type="password")
-            btn_login = st.form_submit_button(
-                "Sign In To Dashboard", use_container_width=True
-            )
+    # ⚠️ FIX: Uses Streamlit's native container border to build the form box layout cleanly
+    with st.container(border=True):
+        render_login_header()
 
-            if btn_login:
-                if st.session_state.user_manager.verify_user(user_input, pass_input):
-                    st.session_state.authenticated_user = user_input
-                    user_sessions = st.session_state.bot_engine.get_all_sessions(
-                        user_input
-                    )
-                    if user_sessions:
-                        st.session_state.active_session_id = user_sessions[0][0]
-                    else:
-                        initial_id = str(uuid.uuid4())
-                        st.session_state.active_session_id = initial_id
-                        st.session_state.bot_engine.create_new_session(
-                            initial_id, user_input, "Welcome Chat"
-                        )
-                    st.rerun()
-                else:
-                    st.error("Invalid username or password credentials.")
+        tab_login, tab_signup = st.tabs(["🔑 Account Login", "📝 Create Free Account"])
 
-    with tab_signup:
-        with st.form("signup_form"):
-            new_user = st.text_input("Choose Unique Username").strip().lower()
-            new_pass = st.text_input("Set Secure Password", type="password")
-            btn_signup = st.form_submit_button(
-                "Register New Account", use_container_width=True
-            )
-
-            if btn_signup:
-                success, msg = st.session_state.user_manager.register_user(
-                    new_user, new_pass
+        with tab_login:
+            st.write("")
+            with st.form("login_form", clear_on_submit=False):
+                user_input = (
+                    st.text_input("Username", placeholder="e.g. sujoy_99")
+                    .strip()
+                    .lower()
                 )
-                if success:
-                    st.success(msg)
-                else:
-                    st.error(msg)
+                pass_input = st.text_input(
+                    "Password", type="password", placeholder="••••••••"
+                )
+                btn_login = st.form_submit_button(
+                    "Sign In To Dashboard", use_container_width=True, type="primary"
+                )
+
+                if btn_login:
+                    if st.session_state.user_manager.verify_user(
+                        user_input, pass_input
+                    ):
+                        st.session_state.authenticated_user = user_input
+                        user_sessions = st.session_state.bot_engine.get_all_sessions(
+                            user_input
+                        )
+                        if user_sessions:
+                            st.session_state.active_session_id = user_sessions
+                        else:
+                            initial_id = str(uuid.uuid4())
+                            st.session_state.active_session_id = initial_id
+                            st.session_state.bot_engine.create_new_session(
+                                initial_id, user_input, "Welcome Chat"
+                            )
+                        st.rerun()
+                    else:
+                        st.error("Invalid username or password credentials.")
+
+        with tab_signup:
+            st.write("")
+            with st.form("signup_form", clear_on_submit=True):
+                new_user = (
+                    st.text_input(
+                        "Choose Unique Username", placeholder="Letters and numbers only"
+                    )
+                    .strip()
+                    .lower()
+                )
+                new_pass = st.text_input(
+                    "Set Secure Password",
+                    type="password",
+                    placeholder="Min 6 characters",
+                )
+                btn_signup = st.form_submit_button(
+                    "Register New Account", use_container_width=True
+                )
+
+                if btn_signup:
+                    success, msg = st.session_state.user_manager.register_user(
+                        new_user, new_pass
+                    )
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+
     st.stop()
 
 # 🧑‍💻 AUTHENTICATED CONTROL MATRIX LAYOUT
@@ -89,7 +104,6 @@ with st.sidebar:
     st.title("⚙️ Control Dashboard")
     st.caption(f"User Active: **{current_user}**")
 
-    # Feature 1: Dynamic Engine Selector Configuration Component
     chosen_model = st.selectbox(
         "🧠 Active Brain Model",
         options=list(st.session_state.bot_engine.available_models.keys()),
@@ -133,7 +147,7 @@ with st.sidebar:
                         current_user
                     )
                     if remaining_sessions:
-                        st.session_state.active_session_id = remaining_sessions[0][0]
+                        st.session_state.active_session_id = remaining_sessions
                     else:
                         fresh_id = str(uuid.uuid4())
                         st.session_state.active_session_id = fresh_id
@@ -144,7 +158,6 @@ with st.sidebar:
 
     st.write("---")
 
-    # Feature 2: Token Metrics Usage Reporting Panel
     current_session = st.session_state.active_session_id
     usage = st.session_state.bot_engine.get_token_usage(current_session)
 
@@ -166,34 +179,34 @@ with st.sidebar:
 # 💬 FETCH AND DISPLAY CURRENT DIALOG CHANNEL
 active_messages = st.session_state.bot_engine.load_messages(current_session)
 
-col_title, col_export = st.columns([0.75, 0.25])
-with col_title:
-    st.title("⚡ Sujoy's 2nd Chatbot Pro")
-with col_export:
-    # Feature 3: Single-Click Dynamic Data Log Export Component Module
-    if active_messages:
-        raw_markdown = f"# Chat History Log\n*Session ID: {current_session}*\n\n"
-        for m in active_messages:
-            raw_markdown += f"### **{m['role'].upper()}**:\n{m['content']}\n\n---\n"
+# ⚠️ FIX: Swapped column layout selectors with a clean native subheader placement.
+# This separates titles and download files cleanly without pushing the button up into the invisible header zone.
+st.subheader("⚡ Sujoy's Chatbot Pro")
 
-        st.download_button(
-            label="📥 Export Chat Log (.md)",
-            data=raw_markdown,
-            file_name=f"chat_log_{current_session[:8]}.md",
-            mime="text/markdown",
-            use_container_width=True,
-        )
+if active_messages:
+    raw_markdown = f"# Chat History Log\n*Session ID: {current_session}*\n\n"
+    for m in active_messages:
+        raw_markdown += f"### **{m['role'].upper()}**:\n{m['content']}\n\n---\n"
+
+    st.download_button(
+        label="📥 Export Chat Log (.md)",
+        data=raw_markdown,
+        file_name=f"chat_log_{current_session[:8]}.md",
+        mime="text/markdown",
+        use_container_width=False,  # Inline natural sizing keeps the text fully visible
+    )
 
 st.caption(
     f"Active Workspace Tracking ID Node: `{current_session}` | Model: **{chosen_model}**"
 )
+st.write("---")
 
 for message in active_messages:
     avatar = "🧑‍💻" if message["role"] == "user" else "🤖"
     with st.chat_message(message["role"], avatar=avatar):
         st.markdown(message["content"])
 
-# 🚀 INCOMING CHAT PROCESSING LOOP WITH MEMORY DUMP WRITING
+# INCOMING CHAT PROCESSING LOOP WITH MEMORY DUMP WRITING
 if prompt := st.chat_input("Ask something..."):
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
@@ -212,12 +225,9 @@ if prompt := st.chat_input("Ask something..."):
             )
             response = st.write_stream(stream_generator)
 
-            # Save Assistant Response
             st.session_state.bot_engine.save_message(
                 current_session, "assistant", response
             )
-
-            # Record Token Consumption Updates dynamically into database tables
             st.session_state.bot_engine.update_token_usage(
                 current_session, prompt, response
             )
