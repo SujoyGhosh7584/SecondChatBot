@@ -3,9 +3,22 @@ import streamlit as st
 from user_manager import UserManager
 from ai_engine import ChatBotEngine
 
-st.set_page_config(page_title="2nd Chat Bot", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="2nd Chat Bot Pro", page_icon="🤖", layout="wide")
 
-# 🛠️ 1. INITIALIZE BACKEND CONFIGURATIONS INDEPENDENTLY
+# 🎨 CUSTOM STYLING INTERFACE INJECTION (CSS THEME POLISH)
+st.markdown(
+    """
+    <style>
+        .stButton>button { border-radius: 8px !important; transition: all 0.3s ease; }
+        .stButton>button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        div[data-testid="stExpander"] { border-radius: 10px !important; border: 1px solid #e0e0e0; }
+        .stMetric { background: #f8f9fa; padding: 10px; border-radius: 8px; border: 1px solid #eaeaea; }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
+# 🛠️ INITIALIZE BACKEND CONFIGURATIONS INDEPENDENTLY
 if "user_manager" not in st.session_state:
     st.session_state.user_manager = UserManager()
 
@@ -20,7 +33,6 @@ if "authenticated_user" not in st.session_state:
 # 🔐 WALL OF AUTHENTICATION: RENDER LOGIN SCREEN IF NO USER LOGGED IN
 if st.session_state.authenticated_user is None:
     st.title("🔒 Chatbot Access Gateway")
-
     tab_login, tab_signup = st.tabs(
         ["🔑 Existing Account Login", "📝 Create Free Account"]
     )
@@ -36,7 +48,6 @@ if st.session_state.authenticated_user is None:
             if btn_login:
                 if st.session_state.user_manager.verify_user(user_input, pass_input):
                     st.session_state.authenticated_user = user_input
-
                     user_sessions = st.session_state.bot_engine.get_all_sessions(
                         user_input
                     )
@@ -70,13 +81,22 @@ if st.session_state.authenticated_user is None:
                     st.error(msg)
     st.stop()
 
-# 🧑‍💻 IF PASSED HERE, USER IS AUTHENTICATED
+# 🧑‍💻 AUTHENTICATED CONTROL MATRIX LAYOUT
 current_user = st.session_state.authenticated_user
 
-# 🎨 2. SIDEBAR PANEL (User Isolated Chat Multi-Row Management)
+# 🎨 SIDEBAR PANEL (Dynamic Models Selector, History List & Advanced Metrics)
 with st.sidebar:
-    st.title("💬 Chat History")
-    st.caption(f"Logged in as: **{current_user}**")
+    st.title("⚙️ Control Dashboard")
+    st.caption(f"User Active: **{current_user}**")
+
+    # Feature 1: Dynamic Engine Selector Configuration Component
+    chosen_model = st.selectbox(
+        "🧠 Active Brain Model",
+        options=list(st.session_state.bot_engine.available_models.keys()),
+    )
+
+    st.write("---")
+    st.subheader("💬 Chat History")
 
     if st.button("➕ New Chat", use_container_width=True, type="primary"):
         new_id = str(uuid.uuid4())
@@ -85,8 +105,6 @@ with st.sidebar:
             new_id, current_user, "New Chat Window"
         )
         st.rerun()
-
-    st.write("---")
 
     past_sessions = st.session_state.bot_engine.get_all_sessions(current_user)
 
@@ -125,26 +143,58 @@ with st.sidebar:
                 st.rerun()
 
     st.write("---")
+
+    # Feature 2: Token Metrics Usage Reporting Panel
+    current_session = st.session_state.active_session_id
+    usage = st.session_state.bot_engine.get_token_usage(current_session)
+
+    with st.expander("📊 Session Token Analytics", expanded=False):
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.metric("Prompt", f"{usage['prompt']}")
+        with col_m2:
+            st.metric("Output", f"{usage['completion']}")
+        st.metric("Total Shared Usage", f"{usage['total']} Tokens")
+        st.caption("Calculated using standard base byte tokenization ratios.")
+
     if st.button("🚪 Log Out Account", use_container_width=True):
         st.session_state.authenticated_user = None
         if "active_session_id" in st.session_state:
             del st.session_state.active_session_id
         st.rerun()
 
-# 💬 3. FETCH AND DISPLAY HISTORICAL DIALOG ROUNDS FOR CURRENT CHANNEL
-current_session = st.session_state.active_session_id
+# 💬 FETCH AND DISPLAY CURRENT DIALOG CHANNEL
 active_messages = st.session_state.bot_engine.load_messages(current_session)
 
-st.title("⚡ Sujoy's 2nd chatbot is here to help")
-st.caption(f"Active Workspace Tracking ID Node: `{current_session}`")
+col_title, col_export = st.columns([0.75, 0.25])
+with col_title:
+    st.title("⚡ Sujoy's 2nd Chatbot Pro")
+with col_export:
+    # Feature 3: Single-Click Dynamic Data Log Export Component Module
+    if active_messages:
+        raw_markdown = f"# Chat History Log\n*Session ID: {current_session}*\n\n"
+        for m in active_messages:
+            raw_markdown += f"### **{m['role'].upper()}**:\n{m['content']}\n\n---\n"
+
+        st.download_button(
+            label="📥 Export Chat Log (.md)",
+            data=raw_markdown,
+            file_name=f"chat_log_{current_session[:8]}.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+
+st.caption(
+    f"Active Workspace Tracking ID Node: `{current_session}` | Model: **{chosen_model}**"
+)
 
 for message in active_messages:
     avatar = "🧑‍💻" if message["role"] == "user" else "🤖"
     with st.chat_message(message["role"], avatar=avatar):
         st.markdown(message["content"])
 
-# 🚀 4. INCOMING CHAT PROCESSING LOOP WITH MEMORY DUMP WRITING
-if prompt := st.chat_input("Ask Sujoy something..."):
+# 🚀 INCOMING CHAT PROCESSING LOOP WITH MEMORY DUMP WRITING
+if prompt := st.chat_input("Ask something..."):
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
 
@@ -158,13 +208,20 @@ if prompt := st.chat_input("Ask Sujoy something..."):
         try:
             updated_history = st.session_state.bot_engine.load_messages(current_session)
             stream_generator = st.session_state.bot_engine.get_streaming_response(
-                updated_history
+                updated_history, chosen_model
             )
             response = st.write_stream(stream_generator)
+
+            # Save Assistant Response
             st.session_state.bot_engine.save_message(
                 current_session, "assistant", response
             )
-            st.rerun()  # Forces immediate visual confirmation of the saved assistant message
+
+            # Record Token Consumption Updates dynamically into database tables
+            st.session_state.bot_engine.update_token_usage(
+                current_session, prompt, response
+            )
+            st.rerun()
 
         except Exception as e:
             st.error(f"System Error: {e}")
