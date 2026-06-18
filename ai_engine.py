@@ -1,17 +1,17 @@
 import os
-import sqlite3
+import pg8000.dbapi
 from datetime import datetime
 from dotenv import load_dotenv
 from groq import Groq
+from user_manager import get_db_connection  # Reuse connection pipeline cleanly
 
 load_dotenv()
 
-DB_PATH = "chatbot_memory.db"
-
 
 def init_chat_db():
-    """Ensures chat session and message tracking tables exist."""
-    with sqlite3.connect(DB_PATH) as conn:
+    """Ensures chat session and message tracking tables exist on Neon Cloud."""
+    conn = get_db_connection()
+    try:
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
@@ -19,18 +19,21 @@ def init_chat_db():
                 user_id TEXT,
                 title TEXT,
                 created_at TEXT
-            )
+            );
         """)
+        # Note: SERIAL is PostgreSQL's clean native version of SQLite's AUTOINCREMENT
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 session_id TEXT,
                 role TEXT,
                 content TEXT,
                 timestamp TEXT
-            )
+            );
         """)
         conn.commit()
+    finally:
+        conn.close()
 
 
 # Initialize tables immediately upon module import
@@ -42,8 +45,7 @@ class ChatBotEngine:
 
     def __init__(self, system_prompt="You are a helpful AI assistant."):
         self.client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-        self.model = "llama-3.1-8b-instant"
-        self.db_path = DB_PATH
+        self.model = "llama-3.3-7b-versatile"
 
         today_str = datetime.now().strftime("%B %d, %Y")
         self.base_system_prompt = (
@@ -51,52 +53,71 @@ class ChatBotEngine:
         )
 
     def create_new_session(self, session_id, user_id, default_title="New Chat"):
-        with sqlite3.connect(self.db_path) as conn:
+        conn = get_db_connection()
+        try:
             cursor = conn.cursor()
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute(
-                "INSERT OR IGNORE INTO sessions VALUES (?, ?, ?, ?)",
-                (session_id, user_id, default_title, now),
-            )
-            conn.commit()
+
+            # Using basic upsert syntax alternative standard across SQL families
+            cursor.execute("SELECT id FROM sessions WHERE id = %s;", (session_id,))
+            if not cursor.fetchone():
+                cursor.execute(
+                    "INSERT INTO sessions VALUES (%s, %s, %s, %s);",
+                    (session_id, user_id, default_title, now),
+                )
+                conn.commit()
+        finally:
+            conn.close()
 
     def update_session_title(self, session_id, new_title):
-        with sqlite3.connect(self.db_path) as conn:
+        conn = get_db_connection()
+        try:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE sessions SET title = ? WHERE id = ?",
+                "UPDATE sessions SET title = %s WHERE id = %s;",
                 (new_title[:30], session_id),
             )
             conn.commit()
+        finally:
+            conn.close()
 
     def get_all_sessions(self, user_id):
-        with sqlite3.connect(self.db_path) as conn:
+        conn = get_db_connection()
+        try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, title FROM sessions WHERE user_id = ? ORDER BY created_at DESC",
+                "SELECT id, title FROM sessions WHERE user_id = %s ORDER BY created_at DESC;",
                 (user_id,),
             )
             return cursor.fetchall()
+        finally:
+            conn.close()
 
     def save_message(self, session_id, role, content):
-        with sqlite3.connect(self.db_path) as conn:
+        conn = get_db_connection()
+        try:
             cursor = conn.cursor()
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute(
-                "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                "INSERT INTO messages (session_id, role, content, timestamp) VALUES (%s, %s, %s, %s);",
                 (session_id, role, content, now),
             )
             conn.commit()
+        finally:
+            conn.close()
 
     def load_messages(self, session_id):
-        with sqlite3.connect(self.db_path) as conn:
+        conn = get_db_connection()
+        try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id ASC",
+                "SELECT role, content FROM messages WHERE session_id = %s ORDER BY id ASC;",
                 (session_id,),
             )
             rows = cursor.fetchall()
             return [{"role": row[0], "content": row[1]} for row in rows]
+        finally:
+            conn.close()
 
     def get_streaming_response(self, chat_history):
         if not chat_history:
@@ -123,8 +144,11 @@ class ChatBotEngine:
                     yield content
 
     def delete_session(self, session_id):
-        with sqlite3.connect(self.db_path) as conn:
+        conn = get_db_connection()
+        try:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-            cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            cursor.execute("DELETE FROM messages WHERE session_id = %s;", (session_id,))
+            cursor.execute("DELETE FROM sessions WHERE id = %s;", (session_id,))
             conn.commit()
+        finally:
+            conn.close()
