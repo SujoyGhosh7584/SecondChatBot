@@ -9,7 +9,7 @@ load_dotenv()
 
 
 def init_chat_db():
-    """Ensures chat session, message tracking, and usage tracking tables exist on Neon Cloud."""
+    """Ensures chat session, usage tracking, and vector RAG tables exist on Neon Cloud."""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -30,13 +30,24 @@ def init_chat_db():
                 timestamp TEXT
             );
         """)
-        # New table to accurately store token tracking histories permanently per user session
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS token_usage (
                 session_id TEXT PRIMARY KEY,
                 prompt_tokens INTEGER,
                 completion_tokens INTEGER,
                 total_tokens INTEGER
+            );
+        """)
+
+        # --- NEW: RAG Vector Extension & Table ---
+        cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_documents (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT,
+                file_name TEXT,
+                content TEXT,
+                embedding vector(384) 
             );
         """)
         conn.commit()
@@ -48,11 +59,10 @@ init_chat_db()
 
 
 class ChatBotEngine:
-    """Handles scalable conversations, dashboard model mapping, and token computations."""
+    """Handles scalable conversations, dashboard model mapping, and context retrieval."""
 
     def __init__(self, system_prompt="You are a helpful AI assistant."):
         self.client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-        # Supported models dictionary map
         self.available_models = {
             "⚡Llama 3.1 (Fast)": "llama-3.1-8b-instant",
             "🚀Groq Compound (High Quality)": "groq/compound",
@@ -63,6 +73,7 @@ class ChatBotEngine:
             f"{system_prompt}\nCurrent Real-world Date: {today_str}."
         )
 
+    # --- SESSION MANAGEMENT METHODS (Unchanged) ---
     def create_new_session(self, session_id, user_id, default_title="New Chat"):
         conn = get_db_connection()
         try:
@@ -131,8 +142,20 @@ class ChatBotEngine:
         finally:
             conn.close()
 
+    def delete_session(self, session_id):
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM messages WHERE session_id = %s;", (session_id,))
+            cursor.execute("DELETE FROM sessions WHERE id = %s;", (session_id,))
+            cursor.execute(
+                "DELETE FROM token_usage WHERE session_id = %s;", (session_id,)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def get_token_usage(self, session_id):
-        """Fetches total aggregated cloud platform tracking integers."""
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
@@ -148,12 +171,9 @@ class ChatBotEngine:
             conn.close()
 
     def update_token_usage(self, session_id, prompt_text, completion_text):
-        """Computes approximate token tracking variables using lightweight statistical models."""
-        # Simple fallback token estimation approximation metric (1 word ~ 1.3 tokens)
-        p_tokens = int(len(prompt_text.split()) * 1.3) + 50  # 50 base for system setup
+        p_tokens = int(len(prompt_text.split()) * 1.3) + 50
         c_tokens = int(len(completion_text.split()) * 1.3)
         t_tokens = p_tokens + c_tokens
-
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
@@ -164,15 +184,53 @@ class ChatBotEngine:
                     completion_tokens = completion_tokens + %s, 
                     total_tokens = total_tokens + %s 
                 WHERE session_id = %s;
-            """,
+                """,
                 (p_tokens, c_tokens, t_tokens, session_id),
             )
             conn.commit()
         finally:
             conn.close()
 
-    def get_streaming_response(self, chat_history, selected_model_key):
-        """Pipes real-time text arrays down using chosen user model configurations."""
+    # --- NEW: RAG KNOWLEDGE METHODS ---
+    def save_document(self, user_id, file_name, chunks, embeddings):
+        """Saves physical document text blocks and their mathematical representations to Neon."""
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            for chunk, embedding in zip(chunks, embeddings):
+                # We cast the python list strictly to a string format so pgvector accepts it
+                cursor.execute(
+                    "INSERT INTO user_documents (user_id, file_name, content, embedding) VALUES (%s, %s, %s, %s);",
+                    (user_id, file_name, chunk, str(embedding)),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_relevant_context(self, user_id, query_embedding, limit=3):
+        """Uses vector math (<-> Euclidean distance) to fetch the 3 most relevant paragraphs."""
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT content FROM user_documents 
+                WHERE user_id = %s 
+                ORDER BY embedding <-> %s 
+                LIMIT %s;
+                """,
+                (user_id, str(query_embedding), limit),
+            )
+            rows = cursor.fetchall()
+            return [row[0] for row in rows] if rows else []
+        finally:
+            conn.close()
+
+    # --- UPDATED: GENERATION WITH CONTEXT ---
+    def get_streaming_response(
+        self, chat_history, selected_model_key, context_texts=None
+    ):
+        """Pipes text logic and injects personal context into the system prompt."""
         if not chat_history:
             return
 
@@ -186,7 +244,17 @@ class ChatBotEngine:
             else chat_history
         )
 
-        compiled_messages = [{"role": "system", "content": self.base_system_prompt}]
+        # Inject retrieved document text into the AI's system memory
+        system_prompt = self.base_system_prompt
+        if context_texts:
+            joined_context = "\n\n---\n\n".join(context_texts)
+            system_prompt += (
+                f"\n\n[SYSTEM INSTRUCTION]: You have access to the user's personal documents. "
+                f"Use the following context to answer their question. If the answer is not in the context, just answer normally.\n\n"
+                f"CONTEXT:\n{joined_context}"
+            )
+
+        compiled_messages = [{"role": "system", "content": system_prompt}]
         for msg in recent_history:
             compiled_messages.append({"role": msg["role"], "content": msg["content"]})
 
@@ -198,16 +266,3 @@ class ChatBotEngine:
                 content = chunk.choices[0].delta.content
                 if content:
                     yield content
-
-    def delete_session(self, session_id):
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM messages WHERE session_id = %s;", (session_id,))
-            cursor.execute("DELETE FROM sessions WHERE id = %s;", (session_id,))
-            cursor.execute(
-                "DELETE FROM token_usage WHERE session_id = %s;", (session_id,)
-            )
-            conn.commit()
-        finally:
-            conn.close()

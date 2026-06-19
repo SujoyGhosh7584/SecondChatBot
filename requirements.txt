@@ -3,3 +3,5 @@ groq
 tavily-python
 python-dotenv
 pg8000
+PyMuPDF
+sentence-transformers

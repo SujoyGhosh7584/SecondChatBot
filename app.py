@@ -3,14 +3,13 @@ import streamlit as st
 from user_manager import UserManager
 from ai_engine import ChatBotEngine
 from ui_components import inject_custom_theme, render_login_header
+import document_processor as dp  # NEW: Imports our RAG processor
 
-# ⚠️ FIX: Changed to "centered" layout to naturally group the login form and remove empty space bugs
 st.set_page_config(page_title="S U J O Y", page_icon="🤖", layout="centered")
 
 # Trigger clean design layers
 inject_custom_theme()
 
-# INITIALIZE BACKEND CONFIGURATIONS INDEPENDENTLY
 if "user_manager" not in st.session_state:
     st.session_state.user_manager = UserManager()
 
@@ -22,13 +21,10 @@ if "bot_engine" not in st.session_state:
 if "authenticated_user" not in st.session_state:
     st.session_state.authenticated_user = None
 
-# 🔐 WALL OF AUTHENTICATION: RENDER GATEWAY OVERLAY IF NO USER ACTIVE
+# 🔐 WALL OF AUTHENTICATION
 if st.session_state.authenticated_user is None:
-
-    # ⚠️ FIX: Uses Streamlit's native container border to build the form box layout cleanly
     with st.container(border=True):
         render_login_header()
-
         tab_login, tab_signup = st.tabs(["🔑 Account Login", "📝 Create Free Account"])
 
         with tab_login:
@@ -55,7 +51,7 @@ if st.session_state.authenticated_user is None:
                             user_input
                         )
                         if user_sessions:
-                            st.session_state.active_session_id = user_sessions
+                            st.session_state.active_session_id = user_sessions[0][0]
                         else:
                             initial_id = str(uuid.uuid4())
                             st.session_state.active_session_id = initial_id
@@ -93,13 +89,13 @@ if st.session_state.authenticated_user is None:
                         st.success(msg)
                     else:
                         st.error(msg)
-
     st.stop()
 
 # 🧑‍💻 AUTHENTICATED CONTROL MATRIX LAYOUT
 current_user = st.session_state.authenticated_user
+current_session = st.session_state.active_session_id
 
-# 🎨 SIDEBAR PANEL (Dynamic Models Selector, History List & Advanced Metrics)
+# 🎨 SIDEBAR PANEL
 with st.sidebar:
     st.title("⚙️ Control Dashboard")
     st.caption(f"User Active: **{current_user}**")
@@ -110,6 +106,27 @@ with st.sidebar:
     )
 
     st.write("---")
+
+    # --- NEW: KNOWLEDGE UPLOADER WIDGET ---
+    st.subheader("📁 Personal Knowledge Base")
+    uploaded_file = st.file_uploader("Upload PDF Data", type=["pdf"])
+    if uploaded_file and st.button("🧠 Learn Document", use_container_width=True):
+        with st.spinner("Extracting and vectorizing data..."):
+            file_bytes = uploaded_file.read()
+            text = dp.extract_text_from_pdf(file_bytes)
+            if text.strip():
+                chunks = dp.chunk_text(text)
+                embeddings = dp.get_embeddings(chunks)
+                st.session_state.bot_engine.save_document(
+                    current_user, uploaded_file.name, chunks, embeddings
+                )
+                st.success(
+                    f"Successfully learned {len(chunks)} fragments from {uploaded_file.name}!"
+                )
+            else:
+                st.error("Could not extract readable text from this PDF.")
+    st.write("---")
+
     st.subheader("💬 Chat History")
 
     if st.button("➕ New Chat", use_container_width=True, type="primary"):
@@ -141,13 +158,12 @@ with st.sidebar:
         with col_del:
             if st.button("🗑️", key=f"del_{session_id}", use_container_width=True):
                 st.session_state.bot_engine.delete_session(session_id)
-
                 if is_current:
                     remaining_sessions = st.session_state.bot_engine.get_all_sessions(
                         current_user
                     )
                     if remaining_sessions:
-                        st.session_state.active_session_id = remaining_sessions
+                        st.session_state.active_session_id = remaining_sessions[0][0]
                     else:
                         fresh_id = str(uuid.uuid4())
                         st.session_state.active_session_id = fresh_id
@@ -157,8 +173,6 @@ with st.sidebar:
                 st.rerun()
 
     st.write("---")
-
-    current_session = st.session_state.active_session_id
     usage = st.session_state.bot_engine.get_token_usage(current_session)
 
     with st.expander("📊 Session Token Analytics", expanded=False):
@@ -168,7 +182,6 @@ with st.sidebar:
         with col_m2:
             st.metric("Output", f"{usage['completion']}")
         st.metric("Total Shared Usage", f"{usage['total']} Tokens")
-        st.caption("Calculated using standard base byte tokenization ratios.")
 
     if st.button("🚪 Log Out Account", use_container_width=True):
         st.session_state.authenticated_user = None
@@ -179,8 +192,6 @@ with st.sidebar:
 # 💬 FETCH AND DISPLAY CURRENT DIALOG CHANNEL
 active_messages = st.session_state.bot_engine.load_messages(current_session)
 
-# ⚠️ FIX: Swapped column layout selectors with a clean native subheader placement.
-# This separates titles and download files cleanly without pushing the button up into the invisible header zone.
 st.subheader("⚡ Sujoy's Chatbot Pro")
 
 if active_messages:
@@ -193,7 +204,7 @@ if active_messages:
         data=raw_markdown,
         file_name=f"chat_log_{current_session[:8]}.md",
         mime="text/markdown",
-        use_container_width=False,  # Inline natural sizing keeps the text fully visible
+        use_container_width=False,
     )
 
 st.caption(
@@ -206,7 +217,7 @@ for message in active_messages:
     with st.chat_message(message["role"], avatar=avatar):
         st.markdown(message["content"])
 
-# INCOMING CHAT PROCESSING LOOP WITH MEMORY DUMP WRITING
+# --- UPDATED: CHAT LOOP WITH VECTOR SEARCH ---
 if prompt := st.chat_input("Ask something..."):
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
@@ -219,9 +230,18 @@ if prompt := st.chat_input("Ask something..."):
 
     with st.chat_message("assistant", avatar="🤖"):
         try:
+            # 1. Embed the user's exact prompt
+            prompt_embedding = dp.get_embeddings([prompt])[0]
+
+            # 2. Search Neon DB for relevant knowledge specific to this user
+            context_texts = st.session_state.bot_engine.get_relevant_context(
+                current_user, prompt_embedding, limit=3
+            )
+
+            # 3. Stream back the response with the context
             updated_history = st.session_state.bot_engine.load_messages(current_session)
             stream_generator = st.session_state.bot_engine.get_streaming_response(
-                updated_history, chosen_model
+                updated_history, chosen_model, context_texts
             )
             response = st.write_stream(stream_generator)
 
