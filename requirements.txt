@@ -5,3 +5,5 @@ python-dotenv
 pg8000
 PyMuPDF
 sentence-transformers
+pgvector
+beautifulsoup4

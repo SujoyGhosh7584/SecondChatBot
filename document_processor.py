@@ -35,7 +35,16 @@ def chunk_text(text, chunk_size=300, overlap=50):
 
 
 def get_embeddings(texts):
-    """Generates 384-dimensional vectors for a list of text chunks."""
+    """
+    Generates 384-dimensional vectors for a single string or a list of text chunks.
+    Automatically formats them as standard floating-point lists for pgvector compatibility.
+    """
     model = get_embedding_model()
-    # model.encode returns numpy arrays. We convert to standard Python lists for PostgreSQL.
-    return model.encode(texts).tolist()
+
+    # Handle single string query generation (e.g. user search input) safely
+    if isinstance(texts, str):
+        return [float(x) for x in model.encode(texts)]
+
+    # Handle list of document chunks safely
+    embeddings = model.encode(texts)
+    return [[float(x) for x in embedding] for embedding in embeddings]

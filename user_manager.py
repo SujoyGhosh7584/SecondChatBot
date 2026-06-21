@@ -1,6 +1,7 @@
 import os
 import pg8000.dbapi
 import hashlib
+import urllib.parse
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -10,25 +11,20 @@ DB_URL = os.environ.get("DATABASE_URL")
 
 
 def get_db_connection():
-    """Parses the connection string and connects directly to the Neon PostgreSQL instance."""
-    # Strip prefixes if accidentally pasted
-    url = DB_URL.replace("postgresql://", "").replace("postgres://", "")
+    """Safely parses any complex connection string using robust URL parsing engines."""
+    if not DB_URL:
+        raise ValueError(
+            "Critical Error: DATABASE_URL environment variable is missing."
+        )
 
-    # Extract credentials out of connection URL string structure
-    credentials, host_db = url.split("@")
-    user, password = credentials.split(":")
-    host_port, database = host_db.split("/")
+    # Leverage robust built-in URL parser to handle special characters seamlessly
+    parsed = urllib.parse.urlparse(DB_URL)
 
-    # Handle parameter extractions like ?sslmode=require cleanly
-    if "?" in database:
-        database = database.split("?")[0]
-
-    if ":" in host_port:
-        host, port = host_port.split(":")
-        port = int(port)
-    else:
-        host = host_port
-        port = 5432
+    user = parsed.username
+    password = parsed.password
+    host = parsed.hostname
+    port = parsed.port if parsed.port else 5432
+    database = parsed.path.lstrip("/")
 
     return pg8000.dbapi.connect(
         user=user,
@@ -80,7 +76,7 @@ class UserManager:
             pwd_hash = self._hash_password(password)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # Using PostgreSQL parameter placeholder format (%s instead of ?)
+            # Using standard parameter placeholder format for pg8000 compatibility
             cursor.execute(
                 "INSERT INTO users VALUES (%s, %s, %s);", (username, pwd_hash, now)
             )

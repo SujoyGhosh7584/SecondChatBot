@@ -3,7 +3,7 @@ import streamlit as st
 from user_manager import UserManager
 from ai_engine import ChatBotEngine
 from ui_components import inject_custom_theme, render_login_header
-import document_processor as dp  # NEW: Imports our RAG processor
+import document_processor as dp  # Imports our RAG processor
 
 st.set_page_config(page_title="S U J O Y", page_icon="🤖", layout="centered")
 
@@ -107,7 +107,7 @@ with st.sidebar:
 
     st.write("---")
 
-    # --- NEW: KNOWLEDGE UPLOADER WIDGET ---
+    # --- KNOWLEDGE UPLOADER WIDGET ---
     st.subheader("📁 Personal Knowledge Base")
     uploaded_file = st.file_uploader("Upload PDF Data", type=["pdf"])
     if uploaded_file and st.button("🧠 Learn Document", use_container_width=True):
@@ -217,41 +217,39 @@ for message in active_messages:
     with st.chat_message(message["role"], avatar=avatar):
         st.markdown(message["content"])
 
-# --- UPDATED: CHAT LOOP WITH VECTOR SEARCH ---
+# --- AGENT SYSTEM EXECUTION PORT LOOP ---
 if prompt := st.chat_input("Ask something..."):
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
 
     st.session_state.bot_engine.save_message(current_session, "user", prompt)
 
+    # Calculate active dynamic window title update
     if len(active_messages) == 0:
         clean_title = prompt[:25] + "..." if len(prompt) > 25 else prompt
         st.session_state.bot_engine.update_session_title(current_session, clean_title)
 
     with st.chat_message("assistant", avatar="🤖"):
         try:
-            # 1. Embed the user's exact prompt
-            prompt_embedding = dp.get_embeddings([prompt])[0]
-
-            # 2. Search Neon DB for relevant knowledge specific to this user
-            context_texts = st.session_state.bot_engine.get_relevant_context(
-                current_user, prompt_embedding, limit=3
-            )
-
-            # 3. Stream back the response with the context
+            # Reload fresh message historical array inside scope execution
             updated_history = st.session_state.bot_engine.load_messages(current_session)
-            stream_generator = st.session_state.bot_engine.get_streaming_response(
-                updated_history, chosen_model, context_texts
+
+            # Fire the continuous token streaming payload iterator
+            stream_generator = st.session_state.bot_engine.execute_agent_chat(
+                updated_history, chosen_model
             )
             response = st.write_stream(stream_generator)
 
+            # Persistent database saving blocks
             st.session_state.bot_engine.save_message(
                 current_session, "assistant", response
             )
             st.session_state.bot_engine.update_token_usage(
                 current_session, prompt, response
             )
+
+            # Force dynamic state sync rerun to immediately display clean historical states
             st.rerun()
 
         except Exception as e:
-            st.error(f"System Error: {e}")
+            st.error(f"Agent Execution Error: {e}")

@@ -1,0 +1,3 @@
+[server]
+# Prevents Streamlit from scanning third-party dependencies recursively
+folderWatchBlacklist = ["D:\\AI-World\\Installations\\Lib\\site-packages"]
